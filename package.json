@@ -1,0 +1,39 @@
+{
+  "name": "bobby-axelbot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Polymarket trading bot with microstructure analysis.",
+  "keywords": [
+    "blockchain",
+    "binance",
+    "bot",
+    "crypto",
+    "hft",
+    "polygon",
+    "polymarket",
+    "nodejs",
+    "trading"
+  ],
+  "homepage": "https://github.com/codesfromshad/bobby-axelbot#readme",
+  "bugs": {
+    "url": "https://github.com/codesfromshad/bobby-axelbot/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/codesfromshad/bobby-axelbot.git"
+  },
+  "license": "UNLICENSED",
+  "author": "Shadman Chowdhury",
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "packageManager": "pnpm@10.27.0",
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "esbuild": "^0.27.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
