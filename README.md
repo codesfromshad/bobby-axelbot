@@ -15,17 +15,22 @@ pnpm install
 
 ## Run
 
-This project is configured as an ESM TypeScript project (`"type": "module"`). A simple way to run the entrypoint is via Node + the ts-node ESM loader:
+This project is configured as an ESM TypeScript project (`"type": "module"`). Since Node ESM requires explicit file extensions for relative imports, the recommended way to run the bot is to bundle first.
 
 ```bash
-node --loader ts-node/esm src/main.ts
+pnpm build
+pnpm start
 ```
 
-Alternatively:
+## Dev
+
+Watches and rebuilds on changes, auto-restarting the bot:
 
 ```bash
-pnpm exec ts-node --esm src/main.ts
+pnpm dev
 ```
+
+This loads environment variables from `.env` (repo root) if present.
 
 ## Project layout
 
