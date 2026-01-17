@@ -3,23 +3,45 @@ import {
   createPriceChangeRings,
   type PriceChangeTuple,
 } from "../../storage/spmc/priceChange.rings";
+import { z } from "zod";
 import { applyLevel, rebuildFromSnapshot } from "./book";
 import { priceToIndex, sizeNumberToScaledBigInt } from "./math";
 import type { OrderbookSnapshot, OrderbookState } from "./types";
 
-export type CoreOrderbookEngineOptions = {
-  /** Must be power of two. */
-  ringCapacity?: number;
-  /** Size scale used when converting levels to bigint. */
-  sizeScale?: number;
-  /** Optional default tick size applied at init. */
-  defaultTickSize?: number;
-  /** Optional callback invoked for every applied level change during `drainOnce()`. */
-  onAppliedLevelUpdate?: (u: AppliedLevelUpdate) => void;
-};
+function isPowerOfTwoSafeInt(n: number): boolean {
+  if (!Number.isSafeInteger(n) || n <= 0) return false;
+  const b = BigInt(n);
+  return (b & (b - 1n)) === 0n;
+}
+
+export const CoreOrderbookEngineOptionsSchema = z
+  .object({
+    /** Must be power of two. */
+    ringCapacity: z
+      .number()
+      .int()
+      .positive()
+      .refine(isPowerOfTwoSafeInt)
+      .optional(),
+    /** Size scale used when converting levels to bigint. */
+    sizeScale: z.number().int().min(0).max(18).optional(),
+    /** Optional default tick size applied at init. */
+    defaultTickSize: z.number().positive().optional(),
+    /** Optional callback invoked for every applied level change during `drainOnce()`. */
+    onAppliedLevelUpdate: z
+      .custom<
+        ((u: AppliedLevelUpdate) => void) | undefined
+      >((v) => (v === undefined ? true : typeof v === "function"))
+      .optional(),
+  })
+  .strict();
+
+export type CoreOrderbookEngineOptions = z.infer<
+  typeof CoreOrderbookEngineOptionsSchema
+>;
 
 export type AppliedLevelUpdate = {
-  id: string;
+  obId: string;
   side: "bid" | "ask";
   priceIndex: number;
   prevSize: bigint;
@@ -31,11 +53,11 @@ export type AppliedLevelUpdate = {
 };
 
 export class CoreOrderbookEngine {
-  readonly #ids: readonly string[];
+  readonly #uniqueObIds: readonly string[];
   readonly #ringCapacity: number;
   readonly #sizeScale: number;
 
-  readonly #books: Map<string, OrderbookState> = new Map();
+  readonly #orderbooks: Map<string, OrderbookState> = new Map();
   readonly #snapshotCache: Map<string, OrderbookSnapshot> = new Map();
 
   readonly #writers: Map<
@@ -54,27 +76,34 @@ export class CoreOrderbookEngine {
     }
   >;
 
-  readonly #best: Map<string, { bid: number | null; ask: number | null }> = new Map();
+  readonly #best: Map<string, { bid: number | null; ask: number | null }> =
+    new Map();
   #onAppliedLevelUpdate: ((u: AppliedLevelUpdate) => void) | null;
 
-  constructor(ids: readonly string[], options?: CoreOrderbookEngineOptions) {
-    this.#ids = ids;
-    this.#ringCapacity = options?.ringCapacity ?? 4096;
-    this.#sizeScale = options?.sizeScale ?? 6;
+  constructor(
+    /**
+     * Unique orderbook IDs (e.g. `clobTokenIds`).
+     */
+    uniqueObIds: readonly string[],
+    /**
+     * Engine options.
+     */
+    options?: CoreOrderbookEngineOptions,
+  ) {
+    const parsedOptions = CoreOrderbookEngineOptionsSchema.parse(options ?? {});
+    this.#uniqueObIds = uniqueObIds;
+    this.#ringCapacity = parsedOptions.ringCapacity ?? 4096;
+    this.#sizeScale = parsedOptions.sizeScale ?? 6;
+    const defaultTickSize = parsedOptions.defaultTickSize ?? null;
 
-    const defaultTickSize =
-      typeof options?.defaultTickSize === "number" && Number.isFinite(options.defaultTickSize)
-        ? options.defaultTickSize
-        : null;
-
-    const { state, writers } = createPriceChangeRings(this.#ids, {
+    const { state, writers } = createPriceChangeRings(this.#uniqueObIds, {
       capacity: this.#ringCapacity,
     });
     this.#writers = writers;
     this.#readers = attachPriceChangeRings(state, { from: "oldest" }).readers;
 
-    for (const id of this.#ids) {
-      this.#books.set(id, {
+    for (const id of this.#uniqueObIds) {
+      this.#orderbooks.set(id, {
         tickSize: defaultTickSize,
         bids: new Map(),
         asks: new Map(),
@@ -85,19 +114,24 @@ export class CoreOrderbookEngine {
       this.#best.set(id, { bid: null, ask: null });
     }
 
-    this.#onAppliedLevelUpdate = options?.onAppliedLevelUpdate ?? null;
+    this.#onAppliedLevelUpdate = parsedOptions.onAppliedLevelUpdate ?? null;
   }
 
-  setOnAppliedLevelUpdateListener(listener: ((u: AppliedLevelUpdate) => void) | null): void {
+  setOnAppliedLevelUpdateListener(
+    listener: ((u: AppliedLevelUpdate) => void) | null,
+  ): void {
     this.#onAppliedLevelUpdate = listener;
   }
 
-  getBestPriceIndices(id: string): { bestBidIndex: number | null; bestAskIndex: number | null } {
-    const b = this.#best.get(id);
+  getBestPriceIndices(obId: string): {
+    bestBidIndex: number | null;
+    bestAskIndex: number | null;
+  } {
+    const b = this.#best.get(obId);
     return { bestBidIndex: b?.bid ?? null, bestAskIndex: b?.ask ?? null };
   }
 
-  #recomputeBest(id: string, book: OrderbookState): void {
+  #recomputeBest(obId: string, book: OrderbookState): void {
     let bestBid: number | null = null;
     for (const idx of book.bids.keys()) {
       if (bestBid == null || idx > bestBid) bestBid = idx;
@@ -106,21 +140,22 @@ export class CoreOrderbookEngine {
     for (const idx of book.asks.keys()) {
       if (bestAsk == null || idx < bestAsk) bestAsk = idx;
     }
-    this.#best.set(id, { bid: bestBid, ask: bestAsk });
+    this.#best.set(obId, { bid: bestBid, ask: bestAsk });
   }
 
-  #updateBestAfterLevelChange(args: {
-    id: string;
+  #updateBestAfterPriceLevelChange(args: {
+    obId: string;
     book: OrderbookState;
     side: "bid" | "ask";
     priceIndex: number;
     newSize: bigint;
   }): void {
-    const best = this.#best.get(args.id) ?? { bid: null, ask: null };
+    const best = this.#best.get(args.obId) ?? { bid: null, ask: null };
 
     if (args.side === "bid") {
       if (args.newSize > 0n) {
-        if (best.bid == null || args.priceIndex > best.bid) best.bid = args.priceIndex;
+        if (best.bid == null || args.priceIndex > best.bid)
+          best.bid = args.priceIndex;
       } else {
         if (best.bid === args.priceIndex) {
           let next: number | null = null;
@@ -132,7 +167,8 @@ export class CoreOrderbookEngine {
       }
     } else {
       if (args.newSize > 0n) {
-        if (best.ask == null || args.priceIndex < best.ask) best.ask = args.priceIndex;
+        if (best.ask == null || args.priceIndex < best.ask)
+          best.ask = args.priceIndex;
       } else {
         if (best.ask === args.priceIndex) {
           let next: number | null = null;
@@ -144,7 +180,7 @@ export class CoreOrderbookEngine {
       }
     }
 
-    this.#best.set(args.id, best);
+    this.#best.set(args.obId, best);
   }
 
   get sizeScale(): number {
@@ -156,15 +192,15 @@ export class CoreOrderbookEngine {
   }
 
   getOrderbook(id: string): OrderbookState | undefined {
-    return this.#books.get(id);
+    return this.#orderbooks.get(id);
   }
 
   // getLatestFeedHash(id: string): string | null {
-  //   return this.#books.get(id)?.lastFeedHash ?? null;
+  //   return this.#orderbooks.get(id)?.lastFeedHash ?? null;
   // }
 
   setTickSize(id: string, tickSize: number): void {
-    const book = this.#books.get(id);
+    const book = this.#orderbooks.get(id);
     if (!book) return;
 
     book.tickSize = tickSize;
@@ -177,7 +213,7 @@ export class CoreOrderbookEngine {
   }
 
   applySnapshot(id: string, snapshot: OrderbookSnapshot): void {
-    const book = this.#books.get(id);
+    const book = this.#orderbooks.get(id);
     if (!book) return;
 
     this.#snapshotCache.set(id, snapshot);
@@ -198,7 +234,7 @@ export class CoreOrderbookEngine {
     timestamp: bigint;
     // feedHash?: string | null;
   }): void {
-    const book = this.#books.get(args.id);
+    const book = this.#orderbooks.get(args.id);
     const w = this.#writers.get(args.id);
     if (!book || !w) return;
     if (book.tickSize == null) return;
@@ -208,7 +244,12 @@ export class CoreOrderbookEngine {
     book.version += 1n;
     const priceIndex = priceToIndex(args.price, book.tickSize);
     const scaledSize = sizeNumberToScaledBigInt(args.size, this.#sizeScale);
-    const tuple = [priceIndex, scaledSize, book.version, args.timestamp] as const;
+    const tuple = [
+      priceIndex,
+      scaledSize,
+      book.version,
+      args.timestamp,
+    ] as const;
 
     if (args.side === "bid") w.bid.push(tuple);
     else w.ask.push(tuple);
@@ -219,9 +260,9 @@ export class CoreOrderbookEngine {
    * Call this in a tight loop or on a timer.
    */
   drainOnce(): void {
-    for (const id of this.#ids) {
-      const book = this.#books.get(id)!;
-      const rr = this.#readers.get(id);
+    for (const obId of this.#uniqueObIds) {
+      const book = this.#orderbooks.get(obId)!;
+      const rr = this.#readers.get(obId);
       if (!rr) continue;
 
       for (;;) {
@@ -230,13 +271,19 @@ export class CoreOrderbookEngine {
         const [priceIndex, size, version, timestamp] = msg.tuple;
         const prevSize = book.bids.get(priceIndex) ?? 0n;
         applyLevel(book.bids, priceIndex, size);
-        this.#updateBestAfterLevelChange({ id, book, side: "bid", priceIndex, newSize: size });
+        this.#updateBestAfterPriceLevelChange({
+          obId,
+          book,
+          side: "bid",
+          priceIndex,
+          newSize: size,
+        });
         book.version = version;
         book.lastTimestamp = timestamp;
 
-        const best = this.#best.get(id) ?? { bid: null, ask: null };
+        const best = this.#best.get(obId) ?? { bid: null, ask: null };
         this.#onAppliedLevelUpdate?.({
-          id,
+          obId,
           side: "bid",
           priceIndex,
           prevSize,
@@ -254,13 +301,19 @@ export class CoreOrderbookEngine {
         const [priceIndex, size, version, timestamp] = msg.tuple;
         const prevSize = book.asks.get(priceIndex) ?? 0n;
         applyLevel(book.asks, priceIndex, size);
-        this.#updateBestAfterLevelChange({ id, book, side: "ask", priceIndex, newSize: size });
+        this.#updateBestAfterPriceLevelChange({
+          obId,
+          book,
+          side: "ask",
+          priceIndex,
+          newSize: size,
+        });
         book.version = version;
         book.lastTimestamp = timestamp;
 
-        const best = this.#best.get(id) ?? { bid: null, ask: null };
+        const best = this.#best.get(obId) ?? { bid: null, ask: null };
         this.#onAppliedLevelUpdate?.({
-          id,
+          obId,
           side: "ask",
           priceIndex,
           prevSize,

@@ -131,7 +131,7 @@ export class LiveOrderbookEngine {
           const clobTokenId = change.clobTokenId;
           const side = change.side === "BUY" ? "bid" : "ask";
 
-          // IMPORTANT: Polymarket PRICE_CHANGE carries the *new aggregate size* at this level.
+          // !IMPORTANT: Polymarket "PRICE_CHANGE" carries the *new aggregate size* at this level.
           this.core.pushLevelUpdate({
             id: clobTokenId,
             side,
