@@ -56,12 +56,12 @@ import { Worker } from "node:worker_threads";
 import { createOrderbookRingBuffers } from "./orderbook/orderbookRingBuffers";
 
 const { state, writers } = createOrderbookRingBuffers(["<clobTokenId>"] as const, {
-	capacity: 1024,
+ capacity: 1024,
 });
 
 // Share `state` to many workers (structured-clone carries SharedArrayBuffer by reference)
 const w = new Worker(new URL("./workers/consumer.js", import.meta.url), {
-	workerData: state,
+ workerData: state,
 });
 
 // Non-blocking publish: tuple is [price, size]
@@ -80,12 +80,12 @@ const bidReader = readers.get("<clobTokenId>")!.bid;
 
 // Poll-style loop: drain available entries each tick
 setInterval(() => {
-	for (;;) {
-		const msg = bidReader.tryRead();
-		if (!msg) break;
-		// msg.tuple is [price, size]
-		// msg.dropped === true means you fell behind and entries were overwritten
-	}
+ for (;;) {
+  const msg = bidReader.tryRead();
+  if (!msg) break;
+  // msg.tuple is [price, size]
+  // msg.dropped === true means you fell behind and entries were overwritten
+ }
 }, 1);
 ```
 
