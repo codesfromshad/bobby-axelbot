@@ -91,4 +91,4 @@ setInterval(() => {
 
 ## License
 
-UNLICENSED (no license granted).
+MIT. See [LICENSE](./LICENSE).
