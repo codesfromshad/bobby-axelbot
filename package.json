@@ -22,7 +22,7 @@
     "type": "git",
     "url": "git+ssh://git@github.com/codesfromshad/bobby-axelbot.git"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "Shadman Chowdhury",
   "type": "module",
   "main": "main.ts",
