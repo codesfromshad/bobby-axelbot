@@ -16,18 +16,27 @@ function isPowerOfTwoSafeInt(n: number): boolean {
 
 export const CoreOrderbookEngineOptionsSchema = z
   .object({
-    /** Must be power of two. */
+    /**
+     * Must be power of two.
+     */
     ringCapacity: z
       .number()
       .int()
       .positive()
       .refine(isPowerOfTwoSafeInt)
       .optional(),
-    /** Size scale used when converting levels to bigint. */
+    /**
+     * Size scale used when converting levels to bigint.
+     */
     sizeScale: z.number().int().min(0).max(18).optional(),
-    /** Optional default tick size applied at init. */
+    /**
+     * Optional default tick size applied at init.
+     */
     defaultTickSize: z.number().positive().optional(),
-    /** Optional callback invoked for every applied level change during `drainOnce()`. */
+    /**
+     * Optional callback invoked for every applied level change
+     * during `drainOnce()`.
+     */
     onAppliedLevelUpdate: z
       .custom<
         ((u: AppliedLevelUpdate) => void) | undefined
@@ -102,8 +111,8 @@ export class CoreOrderbookEngine {
     this.#writers = writers;
     this.#readers = attachPriceChangeRings(state, { from: "oldest" }).readers;
 
-    for (const id of this.#uniqueObIds) {
-      this.#orderbooks.set(id, {
+    for (const obId of this.#uniqueObIds) {
+      this.#orderbooks.set(obId, {
         tickSize: defaultTickSize,
         bids: new Map(),
         asks: new Map(),
@@ -111,7 +120,7 @@ export class CoreOrderbookEngine {
         lastTimestamp: 0n,
         // lastFeedHash: null,
       });
-      this.#best.set(id, { bid: null, ask: null });
+      this.#best.set(obId, { bid: null, ask: null });
     }
 
     this.#onAppliedLevelUpdate = parsedOptions.onAppliedLevelUpdate ?? null;
