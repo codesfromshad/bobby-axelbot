@@ -42,4 +42,4 @@ Thumbs.db
 .vscode-test/
 
 # strategies directory
-src/strategies/
+/src/strategies/
