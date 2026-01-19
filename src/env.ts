@@ -3,6 +3,8 @@ import { z } from "zod";
 
 export const env = createEnv({
   server: {
+    CHAINLINK_API_KEY: z.string().min(1),
+    CHAINLINK_API_SECRET: z.string().min(1),
     POLYMARKET_USER_PRIVATE_KEY: z.string().min(1),
     POLYMARKET_USER_FUNDER_ADDRESS: z.string().min(1),
     POLYMARKET_USER_API_KEY: z.string().min(1),
