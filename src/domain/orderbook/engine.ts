@@ -10,31 +10,31 @@ function isPowerOfTwoSafeInt(n: number): boolean {
   return (b & (b - 1n)) === 0n;
 }
 
-export type PriceChangeTuple = readonly [
+export type PriceLevelUpdateTuple = readonly [
   priceIndex: number,
   size: bigint,
   version: bigint,
   timestamp: bigint
 ];
 
-export type PriceChangeRingsState = {
+export type PriceLevelRingsState = {
   version: 1;
   entries: Array<{
-    clobTokenId: string;
+    uniqueObId: string;
     bid: SpmcStructRingBufferState;
     ask: SpmcStructRingBufferState;
   }>;
 };
 
-export function attachPriceChangeRings(
-  state: PriceChangeRingsState,
+export function attachPriceLevelRings(
+  state: PriceLevelRingsState,
   options?: SpmcReaderOptions
 ): {
   readers: Map<
     string,
     {
-      bid: SpmcStructRingReader<PriceChangeTuple>;
-      ask: SpmcStructRingReader<PriceChangeTuple>;
+      bid: SpmcStructRingReader<PriceLevelUpdateTuple>;
+      ask: SpmcStructRingReader<PriceLevelUpdateTuple>;
     }
   >;
 } {
@@ -45,59 +45,59 @@ export function attachPriceChangeRings(
   const readers = new Map<
     string,
     {
-      bid: SpmcStructRingReader<PriceChangeTuple>;
-      ask: SpmcStructRingReader<PriceChangeTuple>;
+      bid: SpmcStructRingReader<PriceLevelUpdateTuple>;
+      ask: SpmcStructRingReader<PriceLevelUpdateTuple>;
     }
   >();
 
   for (const entry of state.entries) {
-    const bid = SpmcStructRingBuffer.attach<PriceChangeTuple>(entry.bid).createReader(options);
-    const ask = SpmcStructRingBuffer.attach<PriceChangeTuple>(entry.ask).createReader(options);
-    readers.set(entry.clobTokenId, { bid, ask });
+    const bid = SpmcStructRingBuffer.attach<PriceLevelUpdateTuple>(entry.bid).createReader(options);
+    const ask = SpmcStructRingBuffer.attach<PriceLevelUpdateTuple>(entry.ask).createReader(options);
+    readers.set(entry.uniqueObId, { bid, ask });
   }
 
   return { readers };
 }
 
-export function createPriceChangeRings(
-  clobTokenIds: readonly string[],
+export function createPriceLevelRings(
+  uniqueObIds: readonly string[],
   options: { capacity: number }
 ): {
-  state: PriceChangeRingsState;
+  state: PriceLevelRingsState;
   writers: Map<
     string,
     {
-      bid: SpmcStructRingWriter<PriceChangeTuple>;
-      ask: SpmcStructRingWriter<PriceChangeTuple>;
+      bid: SpmcStructRingWriter<PriceLevelUpdateTuple>;
+      ask: SpmcStructRingWriter<PriceLevelUpdateTuple>;
     }
   >;
 } {
-  const entries: PriceChangeRingsState["entries"] = [];
+  const entries: PriceLevelRingsState["entries"] = [];
   const writers = new Map<
     string,
     {
-      bid: SpmcStructRingWriter<PriceChangeTuple>;
-      ask: SpmcStructRingWriter<PriceChangeTuple>;
+      bid: SpmcStructRingWriter<PriceLevelUpdateTuple>;
+      ask: SpmcStructRingWriter<PriceLevelUpdateTuple>;
     }
   >();
 
-  for (const clobTokenId of clobTokenIds) {
-    const bidRb = SpmcStructRingBuffer.create<PriceChangeTuple>({
+  for (const uniqueObId of uniqueObIds) {
+    const bidRb = SpmcStructRingBuffer.create<PriceLevelUpdateTuple>({
       capacity: options.capacity,
       fields: [{ type: "i32" }, { type: "i64" }, { type: "i64" }, { type: "i64" }],
     });
-    const askRb = SpmcStructRingBuffer.create<PriceChangeTuple>({
+    const askRb = SpmcStructRingBuffer.create<PriceLevelUpdateTuple>({
       capacity: options.capacity,
       fields: [{ type: "i32" }, { type: "i64" }, { type: "i64" }, { type: "i64" }],
     });
 
     entries.push({
-      clobTokenId,
+      uniqueObId,
       bid: bidRb.state,
       ask: askRb.state,
     });
 
-    writers.set(clobTokenId, {
+    writers.set(uniqueObId, {
       bid: bidRb.createWriter(),
       ask: askRb.createWriter(),
     });
@@ -167,16 +167,16 @@ export class CoreOrderbookEngine {
   readonly #writers: Map<
     string,
     {
-      bid: import("../../storage/spmc").SpmcStructRingWriter<PriceChangeTuple>;
-      ask: import("../../storage/spmc").SpmcStructRingWriter<PriceChangeTuple>;
+      bid: import("../../storage/spmc").SpmcStructRingWriter<PriceLevelUpdateTuple>;
+      ask: import("../../storage/spmc").SpmcStructRingWriter<PriceLevelUpdateTuple>;
     }
   >;
 
   readonly #readers: Map<
     string,
     {
-      bid: import("../../storage/spmc").SpmcStructRingReader<PriceChangeTuple>;
-      ask: import("../../storage/spmc").SpmcStructRingReader<PriceChangeTuple>;
+      bid: import("../../storage/spmc").SpmcStructRingReader<PriceLevelUpdateTuple>;
+      ask: import("../../storage/spmc").SpmcStructRingReader<PriceLevelUpdateTuple>;
     }
   >;
 
@@ -200,11 +200,11 @@ export class CoreOrderbookEngine {
     this.#sizeScale = parsedOptions.sizeScale ?? 6;
     const defaultTickSize = parsedOptions.defaultTickSize ?? null;
 
-    const { state, writers } = createPriceChangeRings(this.#uniqueObIds, {
+    const { state, writers } = createPriceLevelRings(this.#uniqueObIds, {
       capacity: this.#ringCapacity,
     });
     this.#writers = writers;
-    this.#readers = attachPriceChangeRings(state, { from: "oldest" }).readers;
+    this.#readers = attachPriceLevelRings(state, { from: "oldest" }).readers;
 
     for (const obId of this.#uniqueObIds) {
       this.#orderbooks.set(obId, {
